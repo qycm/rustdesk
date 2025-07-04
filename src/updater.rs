@@ -33,18 +33,18 @@ pub fn start_auto_update() {
 }
 
 #[allow(dead_code)]
-pub fn manually_check_update() -> ResultType<()> {
-    let sender = TX_MSG.lock().unwrap();
-    sender.send(UpdateMsg::CheckUpdate)?;
-    Ok(())
-}
+/*pub fn manually_check_update() -> ResultType<()> {
+ *   let sender = TX_MSG.lock().unwrap();
+ *   sender.send(UpdateMsg::CheckUpdate)?;
+ *   Ok(())
+*}
 
 #[allow(dead_code)]
-pub fn stop_auto_update() {
-    let sender = TX_MSG.lock().unwrap();
-    sender.send(UpdateMsg::Exit).unwrap_or_default();
-}
-
+*pub fn stop_auto_update() {
+*    let sender = TX_MSG.lock().unwrap();
+*    sender.send(UpdateMsg::Exit).unwrap_or_default();
+*}
+*/
 #[inline]
 fn has_no_active_conns() -> bool {
     let conns = crate::Connection::alive_conns();
