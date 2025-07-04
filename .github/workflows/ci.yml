@@ -69,7 +69,7 @@ jobs:
     name: ${{ matrix.job.target }} (${{ matrix.job.os }})
     runs-on: ${{ matrix.job.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       mini-success-ratio: 0.6
       matrix:
         job:
