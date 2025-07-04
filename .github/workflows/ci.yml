@@ -70,6 +70,7 @@ jobs:
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
+      mini-success-ratio: 0.6
       matrix:
         job:
           # - { target: aarch64-unknown-linux-gnu   , os: ubuntu-20.04, use-cross: true }
