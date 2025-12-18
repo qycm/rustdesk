@@ -4,6 +4,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
@@ -61,12 +62,21 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     String? connToken,
   }) {
     final tabKey = '${peerId}_$terminalId';
+    final alias = bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
+    final tabLabel =
+        alias.isNotEmpty ? '$alias #$terminalId' : '$peerId #$terminalId';
     return TabInfo(
       key: tabKey,
-      label: '$peerId #$terminalId',
+      label: tabLabel,
       selectedIcon: selectedIcon,
       unselectedIcon: unselectedIcon,
       onTabCloseButton: () async {
+        if (await desktopTryShowTabAuditDialogCloseCancelled(
+          id: tabKey,
+          tabController: tabController,
+        )) {
+          return;
+        }
         // Close the terminal session first
         final ffi = TerminalConnectionManager.getExistingConnection(peerId);
         if (ffi != null) {
@@ -124,7 +134,7 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
       },
       setter: (bool v) async {
         final ffi = Get.find<FFI>(tag: 'terminal_$peerId');
-        bind.sessionToggleOption(
+        await bind.sessionToggleOption(
           sessionId: ffi.sessionId,
           value: kOptionTerminalPersistent,
         );
@@ -171,10 +181,24 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
           forceRelay: args['forceRelay'],
           connToken: args['connToken'],
         ));
+      } else if (call.method == kWindowEventRestoreTerminalSessions) {
+        _restoreSessions(call.arguments);
       } else if (call.method == "onDestroy") {
         tabController.clear();
       } else if (call.method == kWindowActionRebuild) {
         reloadCurrentWindow();
+      } else if (call.method == kWindowEventActiveSession) {
+        if (tabController.state.value.tabs.isEmpty) {
+          return false;
+        }
+        final currentTab = tabController.state.value.selectedTabInfo;
+        assert(call.arguments is String,
+            "Expected String arguments for kWindowEventActiveSession, got ${call.arguments.runtimeType}");
+        if (currentTab.key.startsWith(call.arguments)) {
+          windowOnTop(windowId());
+          return true;
+        }
+        return false;
       }
     });
     Future.delayed(Duration.zero, () {
@@ -186,6 +210,32 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     super.dispose();
+  }
+
+  Future<void> _restoreSessions(String arguments) async {
+    Map<String, dynamic>? args;
+    try {
+      args = jsonDecode(arguments) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint("Error parsing JSON arguments in _restoreSessions: $e");
+      return;
+    }
+    final persistentSessions =
+        args['persistent_sessions'] as List<dynamic>? ?? [];
+    final sortedSessions = persistentSessions.whereType<int>().toList()..sort();
+    for (final terminalId in sortedSessions) {
+      _addNewTerminalForCurrentPeer(terminalId: terminalId);
+      // A delay is required to ensure the UI has sufficient time to update
+      // before adding the next terminal. Without this delay, `_TerminalPageState::dispose()`
+      // may be called prematurely while the tab widget is still in the tab controller.
+      // This behavior is likely due to a race condition between the UI rendering lifecycle
+      // and the addition of new tabs. Attempts to use `_TerminalPageState::addPostFrameCallback()`
+      // to wait for the previous page to be ready were unsuccessful, as the observed call sequence is:
+      // `initState() 2 -> dispose() 2 -> postFrameCallback() 2`, followed by `initState() 3`.
+      // The `Future.delayed` approach mitigates this issue by introducing a buffer period,
+      // allowing the UI to stabilize before proceeding.
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
   }
 
   bool _handleKeyEvent(KeyEvent event) {
@@ -276,17 +326,20 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     return false;
   }
 
-  void _addNewTerminal(String peerId) {
+  void _addNewTerminal(String peerId, {int? terminalId}) {
     // Find first tab for this peer to get connection parameters
     final firstTab = tabController.state.value.tabs.firstWhere(
       (tab) => tab.key.startsWith('$peerId\_'),
     );
     if (firstTab.page is TerminalPage) {
       final page = firstTab.page as TerminalPage;
-      final terminalId = _nextTerminalId++;
+      final newTerminalId = terminalId ?? _nextTerminalId++;
+      if (terminalId != null && terminalId >= _nextTerminalId) {
+        _nextTerminalId = terminalId + 1;
+      }
       tabController.add(_createTerminalTab(
         peerId: peerId,
-        terminalId: terminalId,
+        terminalId: newTerminalId,
         password: page.password,
         isSharedPassword: page.isSharedPassword,
         forceRelay: page.forceRelay,
@@ -295,12 +348,12 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     }
   }
 
-  void _addNewTerminalForCurrentPeer() {
+  void _addNewTerminalForCurrentPeer({int? terminalId}) {
     final currentTab = tabController.state.value.selectedTabInfo;
     final parts = currentTab.key.split('_');
     if (parts.isNotEmpty) {
       final peerId = parts[0];
-      _addNewTerminal(peerId);
+      _addNewTerminal(peerId, terminalId: terminalId);
     }
   }
 
@@ -364,6 +417,14 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
 
   Future<bool> handleWindowCloseButton() async {
     final connLength = tabController.state.value.tabs.length;
+    if (connLength == 1) {
+      if (await desktopTryShowTabAuditDialogCloseCancelled(
+        id: tabController.state.value.tabs[0].key,
+        tabController: tabController,
+      )) {
+        return false;
+      }
+    }
     if (connLength <= 1) {
       tabController.clear();
       return true;

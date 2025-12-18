@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/terminal_model.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:xterm/xterm.dart';
 import '../../desktop/pages/terminal_connection_manager.dart';
 
@@ -30,6 +32,14 @@ class _TerminalPageState extends State<TerminalPage>
     with AutomaticKeepAliveClientMixin {
   late FFI _ffi;
   late TerminalModel _terminalModel;
+
+  // For web only.
+  // 'monospace' does not work on web, use Google Fonts, `??` is only for null safety.
+  final String _robotoMonoFontFamily = isWeb
+      ? (GoogleFonts.robotoMono().fontFamily ?? 'monospace')
+      : 'monospace';
+
+  SessionID get sessionId => _ffi.sessionId;
 
   @override
   void initState() {
@@ -75,12 +85,23 @@ class _TerminalPageState extends State<TerminalPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    return WillPopScope(
+      onWillPop: () async {
+        clientClose(sessionId, _ffi);
+        return false; // Prevent default back behavior
+      },
+      child: buildBody(),
+    );
+  }
+
+  Widget buildBody() {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: TerminalView(
         _terminalModel.terminal,
         controller: _terminalModel.terminalController,
         autofocus: true,
+        textStyle: _getTerminalStyle(),
         backgroundOpacity: 0.7,
         padding: const EdgeInsets.symmetric(horizontal: 5.0, vertical: 2.0),
         onSecondaryTapDown: (details, offset) async {
@@ -99,6 +120,17 @@ class _TerminalPageState extends State<TerminalPage>
         },
       ),
     );
+  }
+
+  // https://github.com/TerminalStudio/xterm.dart/issues/42#issuecomment-877495472
+  // https://github.com/TerminalStudio/xterm.dart/issues/198#issuecomment-2526548458
+  TerminalStyle _getTerminalStyle() {
+    return isWeb
+        ? TerminalStyle(
+            fontFamily: _robotoMonoFontFamily,
+            fontSize: 14,
+          )
+        : const TerminalStyle();
   }
 
   @override
